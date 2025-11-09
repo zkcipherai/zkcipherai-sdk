@@ -18,7 +18,8 @@ It transforms ordinary computation into **cryptographically proven intelligence*
 > **Compute privately. Prove publicly.**
 
 With zkCipherAI, intelligence evolves under encryption — bringing cryptographic assurance to the future of AI.
-**Visit our platform:** [zkcipher.ai](https://zkcipher.ai)
+
+**Visit our platform:** [www.zkcipherai.xyz](https://www.zkcipherai.xyz)
 
 
 ---
