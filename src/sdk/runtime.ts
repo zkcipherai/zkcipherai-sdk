@@ -6,6 +6,7 @@ import { ProofGenerator } from '../proof/generator';
 import { ProofVerifier } from '../proof/verifier';
 import { ModelSync } from '../ai/modelSync';
 import { SolanaClient } from '../solana/client';
+import { ConfigLoader, ZkCipherConfig } from '../config/config';
 
 interface RuntimeConfig {
   environment: 'development' | 'staging' | 'production';
@@ -30,7 +31,7 @@ interface RuntimeMetrics {
 
 class Runtime {
   private logger: Logger;
-  private config: RuntimeConfig;
+  private config: ZkCipherConfig;
   private components: Map<string, any>;
   private metrics: RuntimeMetrics;
   private startTime: number;
@@ -38,11 +39,43 @@ class Runtime {
 
   constructor(config: Partial<RuntimeConfig> = {}) {
     this.logger = new Logger('Runtime');
-    this.config = this.initializeConfig(config);
+    
+    // Load unified configuration
+    this.config = ConfigLoader.load();
+    
+    // Merge with runtime-specific config
+    this.mergeRuntimeConfig(config);
+    
     this.components = new Map();
     this.metrics = this.initializeMetrics();
     this.startTime = Date.now();
     this.isInitialized = false;
+    
+    this.logger.info('Runtime initialized with unified configuration');
+  }
+
+  private mergeRuntimeConfig(runtimeConfig: Partial<RuntimeConfig>): void {
+    // Update log level if provided
+    if (runtimeConfig.logLevel) {
+      this.config.logLevel = runtimeConfig.logLevel;
+    }
+
+    // Merge security settings
+    if (runtimeConfig.security) {
+      this.config.security = {
+        ...this.config.security,
+        ...runtimeConfig.security
+      };
+    }
+
+    // Merge other runtime-specific settings
+    if (runtimeConfig.performanceMonitoring !== undefined) {
+      this.config.performanceMonitoring = runtimeConfig.performanceMonitoring;
+    }
+
+    if (runtimeConfig.cacheEnabled !== undefined) {
+      this.config.cacheEnabled = runtimeConfig.cacheEnabled;
+    }
   }
 
   private initializeConfig(config: Partial<RuntimeConfig>): RuntimeConfig {
@@ -143,6 +176,37 @@ class Runtime {
     this.logger.debug('Performance monitoring initialized');
   }
 
+  /**
+   * Get network configuration
+   */
+  getNetwork(): ZkCipherConfig['network'] {
+    return this.config.network;
+  }
+
+  /**
+   * Get cipher engine settings
+   */
+  getCipherSettings(): ZkCipherConfig['security']['encryption'] & ZkCipherConfig['cipherEngine'] {
+    return {
+      ...this.config.security.encryption,
+      ...this.config.cipherEngine
+    };
+  }
+
+  /**
+   * Get AI model configuration
+   */
+  getModel(): ZkCipherConfig['ai']['model'] {
+    return this.config.ai.model;
+  }
+
+  /**
+   * Get complete configuration
+   */
+  getConfig(): ZkCipherConfig {
+    return this.config;
+  }
+
   getComponent<T>(componentName: string): T {
     if (!this.components.has(componentName)) {
       throw new Error(`Component not found: ${componentName}`);
@@ -231,7 +295,7 @@ class Runtime {
 
   getRuntimeStatus(): {
     initialized: boolean;
-    config: RuntimeConfig;
+    config: ZkCipherConfig;
     metrics: RuntimeMetrics;
     components: string[];
   } {
@@ -260,7 +324,12 @@ class Runtime {
         details: {
           components: componentHealth,
           metrics: this.metrics,
-          uptime: this.metrics.uptime
+          uptime: this.metrics.uptime,
+          config: {
+            environment: this.config.environment,
+            network: this.config.network.solana.cluster,
+            model: this.config.ai.model.default
+          }
         }
       };
 
@@ -316,9 +385,11 @@ class Runtime {
     this.logger.info(`  Cache Enabled: ${this.config.cacheEnabled}`);
     this.logger.info(`  Components: ${this.components.size}`);
     this.logger.info(`  Security: Key Rotation=${this.config.security.keyRotation}, Max Operations=${this.config.security.maxConcurrentOperations}`);
+    this.logger.info(`  Network: ${this.config.network.solana.cluster}`);
+    this.logger.info(`  AI Model: ${this.config.ai.model.default}`);
   }
 
-  updateConfig(newConfig: Partial<RuntimeConfig>): void {
+  updateConfig(newConfig: Partial<ZkCipherConfig>): void {
     this.config = { ...this.config, ...newConfig };
     this.logger.info('Runtime configuration updated');
 
