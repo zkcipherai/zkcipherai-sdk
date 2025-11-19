@@ -13,14 +13,20 @@ import {
   statusAction
 } from './actions';
 import { Logger } from '../utils/logger';
+import { ConfigLoader } from '../config/config';
 
 class zkCipherCLI {
   private program: Command;
   private logger: Logger;
+  private config: any;
 
   constructor() {
     this.program = new Command();
     this.logger = new Logger('CLI');
+    
+    // Load configuration on CLI startup
+    this.config = ConfigLoader.load();
+    
     this.setupCLI();
   }
 
@@ -33,9 +39,13 @@ class zkCipherCLI {
       .option('--silent', 'Suppress all output except results')
       .hook('preAction', (thisCommand, actionCommand) => {
         const options = thisCommand.opts();
+        
+        // Display config info on CLI start (unless silent)
         if (!options.silent) {
+          this.displayConfigInfo();
           decryptEffect();
         }
+        
         if (options.debug) {
           process.env.DEBUG = 'true';
           this.logger.debug('Debug mode enabled');
@@ -43,6 +53,19 @@ class zkCipherCLI {
       });
 
     this.setupCommands();
+  }
+
+  /**
+   * Display basic configuration information on CLI start
+   */
+  private displayConfigInfo(): void {
+    const { environment, network, ai, logLevel } = this.config;
+    
+    console.log('🔧 zkCipherAI Configuration:');
+    console.log(`   Environment: ${environment} | Log Level: ${logLevel}`);
+    console.log(`   Network: ${network.solana.cluster} | AI Model: ${ai.model.default}`);
+    console.log(`   RPC: ${network.solana.rpcUrl}`);
+    console.log(''); // Empty line for separation
   }
 
   private setupCommands(): void {
@@ -113,6 +136,12 @@ class zkCipherCLI {
       .action(statusAction);
 
     this.program
+      .command('config')
+      .description('Display current configuration')
+      .option('--show-secrets', 'Show sensitive configuration values')
+      .action(this.configAction.bind(this));
+
+    this.program
       .command('keygen')
       .description('Generate encryption keys')
       .option('--type <type>', 'Key type (session|master|ephemeral)', 'session')
@@ -138,12 +167,46 @@ Examples:
   $ zkcipher encrypt --data "sensitive information" --level maximum
   $ zkcipher proof --data inference_result.json --type inference
   $ zkcipher solana-verify --proof proof_abc123 --network mainnet
+  $ zkcipher config --show-secrets
 
 Environment Variables:
   ZKCIPHER_RPC_URL      Solana RPC endpoint
   ZKCIPHER_LOG_LEVEL    Log level (debug, info, warn, error)
   ZKCIPHER_KEYSTORE     Path to key storage directory
     `);
+  }
+
+  private async configAction(options: any): Promise<void> {
+    try {
+      console.log('📋 zkCipherAI Current Configuration:\n');
+      
+      const config = ConfigLoader.getConfig();
+      
+      // Safe display (hide sensitive info unless explicitly requested)
+      const displayConfig = { ...config };
+      
+      if (!options.showSecrets) {
+        if (displayConfig.network?.solana?.rpcUrl) {
+          const url = new URL(displayConfig.network.solana.rpcUrl);
+          displayConfig.network.solana.rpcUrl = `${url.protocol}//${url.hostname}${url.pathname}***`;
+        }
+        
+        if (displayConfig.network?.cipher?.endpoint) {
+          const url = new URL(displayConfig.network.cipher.endpoint);
+          displayConfig.network.cipher.endpoint = `${url.protocol}//${url.hostname}${url.pathname}***`;
+        }
+      }
+      
+      console.log(JSON.stringify(displayConfig, null, 2));
+      
+      // Show config file location info
+      this.logger.info('Configuration loaded from unified config layer');
+      this.logger.info('Use zkcipher.config.json to customize settings');
+      
+    } catch (error) {
+      this.logger.error(`Failed to display configuration: ${error.message}`);
+      process.exit(1);
+    }
   }
 
   private async keygenAction(options: any): Promise<void> {
