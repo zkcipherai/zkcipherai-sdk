@@ -8,11 +8,24 @@ interface LoggerConfig {
   pulseAnimation: boolean;
 }
 
+interface EncryptedPayload {
+  version: string;
+  algorithm: string;
+  iv: string;
+  tag: string;
+  payload: string;
+  timestamp?: string;
+  metadata?: Record<string, any>;
+}
+
+type LogHook = (level: LogLevel, message: string, data?: any) => void;
+
 class Logger {
   private config: LoggerConfig;
   private pulseInterval: NodeJS.Timeout | null;
   private pulseFrames: string[];
   private pulseFrameIndex: number;
+  private hooks: Map<string, LogHook>;
 
   constructor(module: string, config: Partial<LoggerConfig> = {}) {
     this.config = {
@@ -27,6 +40,7 @@ class Logger {
     this.pulseInterval = null;
     this.pulseFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
     this.pulseFrameIndex = 0;
+    this.hooks = new Map();
 
     this.initializePulseAnimation();
   }
@@ -39,34 +53,120 @@ class Logger {
     }
   }
 
+  addHook(name: string, hook: LogHook): void {
+    this.hooks.set(name, hook);
+    this.debug(`Log hook added: ${name}`);
+  }
+
+  removeHook(name: string): void {
+    this.hooks.delete(name);
+    this.debug(`Log hook removed: ${name}`);
+  }
+
+  private executeHooks(level: LogLevel, message: string, data?: any): void {
+    for (const [name, hook] of this.hooks) {
+      try {
+        hook(level, message, data);
+      } catch (error) {
+        console.error(`Log hook ${name} failed:`, error);
+      }
+    }
+  }
+
   debug(message: string, ...args: any[]): void {
     if (this.shouldLog('debug')) {
+      this.executeHooks('debug', message, args);
       this.log('debug', message, args);
     }
   }
 
   info(message: string, ...args: any[]): void {
     if (this.shouldLog('info')) {
+      this.executeHooks('info', message, args);
       this.log('info', message, args);
     }
   }
 
   warn(message: string, ...args: any[]): void {
     if (this.shouldLog('warn')) {
+      this.executeHooks('warn', message, args);
       this.log('warn', message, args);
     }
   }
 
   error(message: string, ...args: any[]): void {
     if (this.shouldLog('error')) {
+      this.executeHooks('error', message, args);
       this.log('error', message, args);
     }
   }
 
   success(message: string, ...args: any[]): void {
     if (this.shouldLog('info')) {
+      this.executeHooks('info', message, args);
       this.log('success', message, args);
     }
+  }
+
+  encryptOperation(operation: string, payload: Partial<EncryptedPayload>, duration?: number): void {
+    const encryptedData: EncryptedPayload = {
+      version: payload.version || 'v0.1',
+      algorithm: payload.algorithm || 'aes-256-gcm',
+      iv: payload.iv || '',
+      tag: payload.tag || '',
+      payload: this.maskPayload(payload.payload || ''),
+      timestamp: payload.timestamp || new Date().toISOString(),
+      metadata: payload.metadata
+    };
+
+    this.info(`🔒 ${operation}`, {
+      encryptedPayload: encryptedData,
+      duration: duration ? `${duration}ms` : undefined
+    });
+  }
+
+  decryptOperation(operation: string, payload: Partial<EncryptedPayload>, success: boolean, duration?: number): void {
+    const level = success ? 'success' : 'error';
+    const icon = success ? '🔓' : '🚫';
+    
+    const encryptedData: EncryptedPayload = {
+      version: payload.version || 'v0.1',
+      algorithm: payload.algorithm || 'aes-256-gcm',
+      iv: payload.iv || '',
+      tag: payload.tag || '',
+      payload: this.maskPayload(payload.payload || ''),
+      timestamp: payload.timestamp || new Date().toISOString(),
+      metadata: payload.metadata
+    };
+
+    this[level](`${icon} ${operation}`, {
+      encryptedPayload: encryptedData,
+      success,
+      duration: duration ? `${duration}ms` : undefined
+    });
+  }
+
+  private maskPayload(payload: string): string {
+    if (payload.length <= 16) return '***';
+    return `${payload.substring(0, 8)}...${payload.substring(payload.length - 8)}`;
+  }
+
+  cipherEngineEvent(event: string, data: any): void {
+    this.executeHooks('info', `CipherEngine: ${event}`, data);
+    
+    const eventConfig = {
+      'encryption_start': { icon: '🔒', color: 'cyan' },
+      'encryption_complete': { icon: '✅', color: 'green' },
+      'decryption_start': { icon: '🔓', color: 'cyan' },
+      'decryption_complete': { icon: '✅', color: 'green' },
+      'key_generated': { icon: '🔑', color: 'yellow' },
+      'key_rotated': { icon: '🔄', color: 'yellow' },
+      'proof_generated': { icon: '🧾', color: 'magenta' },
+      'proof_verified': { icon: '✓', color: 'green' }
+    };
+
+    const config = eventConfig[event] || { icon: '⚡', color: 'cyan' };
+    this.info(`${config.icon} CipherEngine: ${event}`, data);
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -128,8 +228,6 @@ class Logger {
       reset: '\x1b[0m',
       bright: '\x1b[1m',
       dim: '\x1b[2m',
-      
-      // Colors
       black: '\x1b[30m',
       red: '\x1b[31m',
       green: '\x1b[32m',
@@ -139,8 +237,6 @@ class Logger {
       cyan: '\x1b[36m',
       white: '\x1b[37m',
       gray: '\x1b[90m',
-
-      // Background
       bgBlack: '\x1b[40m',
       bgRed: '\x1b[41m',
       bgGreen: '\x1b[42m',
@@ -349,7 +445,8 @@ class Logger {
       clearInterval(this.pulseInterval);
       this.pulseInterval = null;
     }
+    this.hooks.clear();
   }
 }
 
-export { Logger, LogLevel, LoggerConfig };
+export { Logger, LogLevel, LoggerConfig, EncryptedPayload, LogHook };
